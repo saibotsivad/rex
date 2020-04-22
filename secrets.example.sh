@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+export REMOTE_EXECUTE_AWS_REGION="us-east-1"
+export REMOTE_EXECUTE_AWS_ACCESS_KEY_ID="EXAMPLEKEY"
+export REMOTE_EXECUTE_AWS_SECRET_ACCESS_KEY="abc123examplesecret"
