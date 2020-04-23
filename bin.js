@@ -9,7 +9,7 @@ const mkdirp = require('mkdirp')
 const path = require('path')
 const promiseForever = require('p-forever')
 const sade = require('sade')
-const SQS = require('aws-sdk/clients/sqs')
+const AWS = require('aws-sdk')
 const uuid = require('just-uuid4')
 
 const prog = sade('rex')
@@ -38,23 +38,31 @@ const exit = (status, message) => {
 }
 
 const getSqsInstance = () => {
-	const region = process.env.REMOTE_EXECUTE_AWS_REGION
-	const accessKeyId = process.env.REMOTE_EXECUTE_AWS_ACCESS_KEY_ID
-	const secretAccessKey = process.env.REMOTE_EXECUTE_AWS_SECRET_ACCESS_KEY
-
-	if (!region || !accessKeyId || !secretAccessKey) {
-		exit(1, 'AWS credentials are not configured correctly.')
-	}
-
 	const QueueUrl = config.get('sqsUrl')
 	if (!QueueUrl) {
 		exit(1, 'No SQS queue URL configured.')
 	}
 
-	return {
-		QueueUrl,
-		sqs: new SQS({ region, accessKeyId, secretAccessKey })
+	let sqs
+
+	const region = process.env.REMOTE_EXECUTE_AWS_REGION
+	const accessKeyId = process.env.REMOTE_EXECUTE_AWS_ACCESS_KEY_ID
+	const secretAccessKey = process.env.REMOTE_EXECUTE_AWS_SECRET_ACCESS_KEY
+	if (region || accessKeyId || secretAccessKey) {
+		if (!region || !accessKeyId || !secretAccessKey) {
+			exit(1, 'AWS credentials are not configured correctly.')
+		}
+		sqs = new AWS.SQS({ region, accessKeyId, secretAccessKey })
+	} else if (config.get('awsprofile')) {
+		AWS.config.credentials = new AWS.SharedIniFileCredentials({
+			profile: config.get('awsprofile')
+		})
+		sqs = new AWS.SQS()
+	} else {
+		sqs = new AWS.SQS()
 	}
+
+	return { QueueUrl, sqs }
 }
 
 const writePayload = async message => {
@@ -119,7 +127,7 @@ prog
 	.describe('Set up this computer to accept remote execution, using messages passed through AWS SQS. For more information, see: https://github.com/saibotsivad/remote-execute')
 
 prog
-	.command('start')
+	.command('listen')
 	.describe('Start listening for execution commands.')
 	.action(() => {
 		console.log('Listening for execution commands...')
@@ -193,6 +201,19 @@ prog
 	})
 
 prog
+	.command('set awsprofile [name]')
+	.describe(`Set an AWS credentials profile name. If 'name' is not set, it will remove the configured profile name.`)
+	.action(name => {
+		if (name) {
+			config.set('awsprofile', name)
+			exit(0, `AWS profile set: ${name}`)
+		} else {
+			config.delete('awsprofile')
+			exit(0, `Removed AWS profile.`)
+		}
+	})
+
+prog
 	.command('set command <name> [script]')
 	.describe(`Set an executable command. If not set, it will remove the registered command. Allowed characters are ${COMMAND_REGEX.toString()} start and end characters may not be dashes or underscores. When a request is received to execute this command, this service will execute <script> with an optional path to a temporary file containing any properties passed in with the execution request.`)
 	.action((name, script) => {
@@ -225,6 +246,13 @@ prog
 			config.delete('tempFolder')
 			exit(0, `Payload temporary folder reverted to default: ${TEMP_FOLDER}`)
 		}
+	})
+
+prog
+	.command('get awsprofile')
+	.describe('Get the SQS queue URL.')
+	.action(() => {
+		exit(0, config.get('awsprofile'))
 	})
 
 prog
