@@ -1,20 +1,20 @@
 {
-  "name": "remote-execute",
+  "name": "@saibotsivad/rex",
   "version": "0.0.0",
   "description": "Remotely execute services via message passing.",
   "bin": {
-    "remote-execute": "bin.js"
+    "rex": "bin.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/saibotsivad/remote-execute.git"
+    "url": "git+https://github.com/saibotsivad/rex.git"
   },
   "author": "saibotsivad",
   "license": "VOL",
   "bugs": {
-    "url": "https://github.com/saibotsivad/remote-execute/issues"
+    "url": "https://github.com/saibotsivad/rex/issues"
   },
-  "homepage": "https://github.com/saibotsivad/remote-execute#readme",
+  "homepage": "https://github.com/saibotsivad/rex#readme",
   "dependencies": {
     "aws-sdk": "^2.516.0",
     "conf": "^5.0.0",
