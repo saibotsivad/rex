@@ -4,8 +4,10 @@ const { execSync } = require('child_process')
 const { readFileSync, writeFileSync } = require('fs')
 const { version } = require('./package.json')
 const Conf = require('conf')
+const delay = require('delay')
 const mkdirp = require('mkdirp')
 const path = require('path')
+const promiseForever = require('p-forever')
 const sade = require('sade')
 const SQS = require('aws-sdk/clients/sqs')
 const uuid = require('just-uuid4')
@@ -13,12 +15,13 @@ const uuid = require('just-uuid4')
 const prog = sade('rex')
 const config = new Conf()
 
-const commandRegex = /[a-zA-Z0-9_-]/
+const COMMAND_REGEX = /[a-zA-Z0-9_-]/
+const SECONDS_DELAY_FOR_ERROR = 10
 const TEMP_FOLDER = '/tmp/remote-execute'
 
 const assertCommandNameIsSafe = name => {
-	if (!commandRegex.test(name)) {
-		console.log(`Allowed characters for command names are ${commandRegex.toString()}`)
+	if (!COMMAND_REGEX.test(name)) {
+		console.log(`Allowed characters for command names are ${COMMAND_REGEX.toString()}`)
 		process.exit(1)
 	}
 }
@@ -28,7 +31,9 @@ const execute = async (script, payloadPathFilename) => {
 }
 
 const exit = (status, message) => {
-	console.log(message)
+	if (message) {
+		console.log(message)
+	}
 	process.exit(status)
 }
 
@@ -52,6 +57,63 @@ const getSqsInstance = () => {
 	}
 }
 
+const writePayload = async message => {
+	const hasPayload = message.Body
+		&& message.MessageAttributes
+		&& message.MessageAttributes.HasBody
+		&& message.MessageAttributes.HasBody.StringValue === 'true'
+	if (hasPayload) {
+		const tempFolder = config.get('tempFolder') || TEMP_FOLDER
+		await mkdirp(tempFolder)
+		const filename = path.join(tempFolder, `${new Date().getTime()}-${uuid()}`)
+		writeFileSync(filename, message.Body, { encoding: 'utf8' })
+		return filename
+	}
+	return undefined
+}
+
+const watchQueue = async () => {
+	try {
+		const { QueueUrl, sqs } = getSqsInstance()
+		const params = {
+			QueueUrl,
+			MaxNumberOfMessages: 1,
+			AttributeNames: [ 'All' ],
+			MessageAttributeNames: [ 'All' ],
+			WaitTimeSeconds: 20
+		}
+		const data = await sqs.receiveMessage(params).promise()
+		if (data.Messages && data.Messages.length) {
+			const name = data.Messages[0].Attributes.MessageGroupId
+			const script = config.get(`commands.${name}`)
+
+			if (!script) {
+				console.error(`Received an unrecognized command: ${name}`)
+			} else {
+				const payloadPathFilename = await writePayload(data.Messages[0])
+				try {
+					await execute(script, payloadPathFilename)
+					console.log(`Executed command successfully: ${name}`)
+				} catch (error) {
+					console.error(`Command execution failed: ${name}`)
+				}
+
+			}
+
+			try {
+				const ReceiptHandle = data.Messages[0].ReceiptHandle
+				await sqs.deleteMessage({ QueueUrl, ReceiptHandle }).promise()
+			} catch (error) {
+				console.error('Error while marking command as received.', error)
+			}
+		}
+		console.log('')
+	} catch (error) {
+		console.error(`Unexpected error while fetching commands. Waiting ${SECONDS_DELAY_FOR_ERROR} seconds to retry.`, error)
+		await delay(SECONDS_DELAY_FOR_ERROR * 1000)
+	}
+}
+
 prog
 	.version(version)
 	.describe('Set up this computer to accept remote execution, using messages passed through AWS SQS. For more information, see: https://github.com/saibotsivad/remote-execute')
@@ -60,103 +122,15 @@ prog
 	.command('start')
 	.describe('Start listening for execution commands.')
 	.action(() => {
-		try {
-			const { QueueUrl, sqs } = getSqsInstance()
-			const params = {
-				QueueUrl,
-				MaxNumberOfMessages: 1,
-				AttributeNames: [ 'All' ]
-			}
-			// TODO listen forever
-			sqs.receiveMessage(params, (error, data) => {
-				if (error) {
-					console.error(error)
-					exit(1, 'Error while attempting to receive SQS messages.')
-				}
-				if (!data.Messages || !data.Messages.length) {
-					exit(1, 'No messages found on queue.')
-				}
-				try {
-					const name = data.Messages[0].Attributes.MessageGroupId
-					const payload = data.Messages[0].Body
-					const tempFolder = config.get('tempFolder') || TEMP_FOLDER
-					mkdirp.sync(tempFolder)
-					const payloadPathFilename = path.join(tempFolder, `${new Date().getTime()}-${uuid()}`)
-					if (payload) {
-						writeFileSync(payloadPathFilename, payload, { encoding: 'utf8' })
-					}
-					const script = config.get(`commands.${name}`)
-					if (!script) {
-						exit(1, `Received an unrecognized command: ${name} => ${payloadPathFilename || '(no payload)'}`)
-					}
-					execute(script, payloadPathFilename)
-						.then(() => {
-							exit(0, `Executed command successfully: ${name}`)
-						})
-						.catch(error => {
-							exit(1, `Command ececution failed: ${name}`)
-						})
-				} catch (error) {
-					console.error(error)
-					exit(1, 'Could not parse SQS body data.')
-				}
+		console.log('Listening for execution commands...')
+		promiseForever(watchQueue)
+			.then(() => {
+				exit(0, 'Done watching for commands.')
 			})
-
-		} catch (error) {
-			console.error(error)
-			exit(1, 'Unexpected failure during startup.')
-		}
-	})
-
-prog
-	.command('add <name> <script>')
-	.describe(`Add an executable command. Allowed characters are ${commandRegex.toString()} start and end characters may not be dashes or underscores. When a request is received to execute this command, this service will execute <script> with an optional path to a temporary file containing any properties passed in with the execution request.`)
-	.action((name, script) => {
-		assertCommandNameIsSafe(name)
-		config.set(`commands.${name}`, script)
-		exit(0, `Added command: ${name} => "${script}"`)
-	})
-
-prog
-	.command('rm <name>')
-	.describe('Remove an executable command.')
-	.action(name => {
-		assertCommandNameIsSafe(name)
-		config.delete(`commands.${name}`)
-		exit(0, `Removed command: ${name}`)
-	})
-
-prog
-	.command('ls')
-	.describe('List all executable commands.')
-	.action(() => {
-		const commands = config.get('commands') || {}
-		Object
-			.keys(commands)
-			.forEach(key => {
-				console.log(`${key} => ${commands[key]}`)
+			.catch(error => {
+				console.error(error)
+				exit(1, 'An unrecoverable error occurred while watching for commands.')
 			})
-	})
-
-prog
-	.command('sqs <url>')
-	.describe(`Set the SQS queue URL. Queue URLs are case-sensitive.`)
-	.action(url => {
-		config.set('sqsUrl', url)
-		exit(0, `Set SQS queue URL: "${url}"`)
-	})
-
-prog
-	.command('tmp [folder]')
-	.describe(`Set the folder to store payloads. Leave blank to revert to default: ${TEMP_FOLDER}`)
-	.action(folder => {
-		if (folder) {
-			config.set('tempFolder', folder)
-			exit(0, `Payload temporary folder set: ${folder}`)
-		} else {
-			config.delete('tempFolder')
-			exit(0, `Payload temporary folder reverted to default: ${TEMP_FOLDER}`)
-		}
 	})
 
 prog
@@ -187,7 +161,15 @@ prog
 		const message = {
 			QueueUrl,
 			MessageGroupId: name,
-			MessageDeduplicationId: uuid()
+			MessageDeduplicationId: `${new Date().getTime()}-${uuid()}`,
+			MessageAttributes: {
+				HasBody: {
+					DataType: 'String',
+					StringValue: payload
+						? 'true'
+						: 'false'
+				}
+			}
 		}
 
 		if (payload) {
@@ -196,6 +178,8 @@ prog
 			} catch (ignore) {
 				exit(1, `Could not read payload file: ${payload}`)
 			}
+		} else {
+			message.MessageBody = name
 		}
 
 		sqs.sendMessage(message, (error, data) => {
@@ -206,6 +190,72 @@ prog
 				exit(0, `Successfully pushed to SQS queue: ${QueueUrl}`)
 			}
 		})
+	})
+
+prog
+	.command('set command <name> [script]')
+	.describe(`Set an executable command. If not set, it will remove the registered command. Allowed characters are ${COMMAND_REGEX.toString()} start and end characters may not be dashes or underscores. When a request is received to execute this command, this service will execute <script> with an optional path to a temporary file containing any properties passed in with the execution request.`)
+	.action((name, script) => {
+		assertCommandNameIsSafe(name)
+		if (script) {
+			config.set(`commands.${name}`, script)
+			exit(0, `Added command: ${name} => ${script}`)
+		} else {
+			config.delete(`commands.${name}`)
+			exit(0, `Removed command: ${name}`)
+		}
+	})
+
+prog
+	.command('set sqs <url>')
+	.describe(`Set the SQS queue URL. Queue URLs are case-sensitive.`)
+	.action(url => {
+		config.set('sqsUrl', url)
+		exit(0, `Set SQS queue URL: "${url}"`)
+	})
+
+prog
+	.command('set temp [folder]')
+	.describe(`Set the folder to store payloads. Leave blank to revert to default: ${TEMP_FOLDER}`)
+	.action(folder => {
+		if (folder) {
+			config.set('tempFolder', folder)
+			exit(0, `Payload temporary folder set: ${folder}`)
+		} else {
+			config.delete('tempFolder')
+			exit(0, `Payload temporary folder reverted to default: ${TEMP_FOLDER}`)
+		}
+	})
+
+prog
+	.command('get command [name]')
+	.describe('List executable commands. If [name] is set, it will print only that command.')
+	.action(name => {
+		if (name) {
+			assertCommandNameIsSafe(name)
+			console.log(config.get(`commands.${name}`))
+		} else {
+			const commands = config.get('commands') || {}
+			Object
+				.keys(commands)
+				.forEach(key => {
+					console.log(`${key} => ${commands[key]}`)
+				})
+		}
+	})
+
+prog
+	.command('get sqs')
+	.describe('Get the SQS queue URL.')
+	.action(() => {
+		exit(0, config.get('sqsUrl'))
+	})
+
+prog
+	.command('get temp')
+	.describe('Get the folder used to store payloads.')
+	.action(() => {
+		exit(0, config.get('tempFolder'))
 	})
 
 prog.parse(process.argv)

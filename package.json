@@ -18,8 +18,10 @@
   "dependencies": {
     "aws-sdk": "^2.516.0",
     "conf": "^5.0.0",
+    "delay": "^4.3.0",
     "just-uuid4": "^1.0.1",
     "mkdirp": "^1.0.4",
+    "p-forever": "^2.1.0",
     "sade": "^1.6.1"
   }
 }
