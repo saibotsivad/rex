@@ -45,9 +45,9 @@ const getSqsInstance = () => {
 
 	let sqs
 
-	const region = process.env.REMOTE_EXECUTE_AWS_REGION
-	const accessKeyId = process.env.REMOTE_EXECUTE_AWS_ACCESS_KEY_ID
-	const secretAccessKey = process.env.REMOTE_EXECUTE_AWS_SECRET_ACCESS_KEY
+	const region = process.env.REX_AWS_REGION
+	const accessKeyId = process.env.REX_AWS_ACCESS_KEY_ID
+	const secretAccessKey = process.env.REX_AWS_SECRET_ACCESS_KEY
 	if (region || accessKeyId || secretAccessKey) {
 		if (!region || !accessKeyId || !secretAccessKey) {
 			exit(1, 'AWS credentials are not configured correctly.')

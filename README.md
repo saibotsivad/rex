@@ -1,8 +1,8 @@
-# 🦖 rex (remote execute)
+# 🦖 REX (`R`emote `EX`ecute)
 
 Remotely execute commands via secure message passing.
 
-## intro
+## Intro
 
 Imagine you have a spare computer at home, and you want to be able
 to run commands on it, such as "build and re-publish my blog".
@@ -14,7 +14,7 @@ or you'd need to be running TeamViewer, or something like that.
 No need! If you have this installed, you can securely and confidently
 pass commands to your computer using the magic of AWS SQS.
 
-## how it works
+## How it Works
 
 On your spare computer, you would install this CLI tool, configure
 it (instructions below), and then leave it running.
@@ -38,7 +38,7 @@ rex push rebuild-blog
 This posts a message to SQS, which your spare computer will then receive,
 and then execute the `/var/opt/rebuild-blog.sh` script.
 
-## data payloads
+## Data Payloads
 
 You can pass a payload of up to ~256 KB, as data on the SQS message.
 
@@ -62,7 +62,7 @@ PATH_TO_FILE=$1
 blogbuilder --config=$PATH_TO_FILE
 ```
 
-## error handling
+## Error Handling
 
 This script doesn't handle errors or retries if your script fails, and
 doesn't log anything anywhere, it just runs the script.
@@ -82,7 +82,7 @@ Or stdout and stderr to different files:
 your-command >> success.txt 2>> errors.txt
 ```
 
-## listen forever
+## Listen Forever
 
 To have this process run forever, try a tool
 [like this one](https://github.com/foreversd/forever), e.g.:
@@ -91,16 +91,16 @@ To have this process run forever, try a tool
 forever start rex listen
 ```
 
-## setup
+## Setup
 
 You'll need [NodeJS](https://nodejs.org/) installed, then you can
 install `rex` globally with:
 
 ```bash
-npm install -g @saibotsivad/rex
+npm install -g rex
 ```
 
-### create sqs queue
+### Create SQS Queue
 
 Inside the AWS console, go to the SQS panel and create a new queue.
 
@@ -108,7 +108,7 @@ Inside the AWS console, go to the SQS panel and create a new queue.
 - Queue Type: select FIFO
 - Click the "Quick-Create Queue"
 
-### listening user
+### Listening User
 
 On the listening computer, you'll need IAM credentials to read off
 the SQS queue.
@@ -143,7 +143,7 @@ that looks like this:
 - `$ACCOUNT_ID` is the AWS account identifier, [available here](https://console.aws.amazon.com/billing/home?#/account)
 - `$QUEUE_NAME` is the SQS queue, e.g. `remote-execute.fifo`
 
-### publishing user
+### Publishing User
 
 On the publishing computer you'll need IAM credentials to
 allow sending messages to the SQS queue.
@@ -175,7 +175,7 @@ that looks like this:
 - `$ACCOUNT_ID` is the AWS account identifier, [available here](https://console.aws.amazon.com/billing/home?#/account)
 - `$QUEUE_NAME` is the SQS queue, e.g. `remote-execute.fifo`
 
-### loading credentials
+### Loading Credentials
 
 There are three options for loading the credentials you just made.
 
@@ -193,7 +193,7 @@ Remember that if you set up `rex` to run using `forever` (earlier in this
 document) that you will need to make sure credentials are configured for
 whatever launches it.
 
-## license
+## License
 
 The code for this project is published and released under the
 [Very Open License](http://veryopenlicense.com).

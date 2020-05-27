@@ -1,7 +1,7 @@
 {
-  "name": "@saibotsivad/rex",
-  "version": "0.0.0",
-  "description": "Remotely execute services via message passing.",
+  "name": "rex",
+  "version": "1.0.0",
+  "description": "Remotely execute services via secure message passing.",
   "bin": {
     "rex": "bin.js"
   },
