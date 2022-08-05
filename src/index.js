@@ -1,23 +1,24 @@
-#!/usr/bin/env node
+import { execSync } from 'node:child_process'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import timers from 'node:timers/promises'
 
-const { execSync } = require('child_process')
-const { readFileSync, writeFileSync } = require('fs')
-const { version } = require('./package.json')
-const Conf = require('conf')
-const delay = require('delay')
-const mkdirp = require('mkdirp')
-const path = require('path')
-const promiseForever = require('p-forever')
-const sade = require('sade')
-const AWS = require('aws-sdk')
-const uuid = require('just-uuid4')
+import promiseForever from 'p-forever'
+import sade from 'sade'
+import AWS from 'aws-sdk'
+import uuid from 'just-uuid4'
+
+import { config } from './config.js'
+
+const version = '__VERSION__'
 
 const prog = sade('rex')
-const config = new Conf()
 
 const COMMAND_REGEX = /[a-zA-Z0-9_-]/
 const SECONDS_DELAY_FOR_ERROR = 10
 const TEMP_FOLDER = '/tmp/remote-execute'
+
+const delay = async millis => timers.setTimeout(millis)
 
 const assertCommandNameIsSafe = name => {
 	if (!COMMAND_REGEX.test(name)) {
@@ -65,15 +66,15 @@ const getSqsInstance = () => {
 	return { QueueUrl, sqs }
 }
 
-const writePayload = async message => {
+const writePayload = message => {
 	const hasPayload = message.Body
 		&& message.MessageAttributes
 		&& message.MessageAttributes.HasBody
 		&& message.MessageAttributes.HasBody.StringValue === 'true'
 	if (hasPayload) {
 		const tempFolder = config.get('tempFolder') || TEMP_FOLDER
-		await mkdirp(tempFolder)
-		const filename = path.join(tempFolder, `${new Date().getTime()}-${uuid()}`)
+		mkdirSync(tempFolder, { recursive: true })
+		const filename = join(tempFolder, `${new Date().getTime()}-${uuid()}`)
 		writeFileSync(filename, message.Body, { encoding: 'utf8' })
 		return filename
 	}
@@ -98,7 +99,7 @@ const watchQueue = async () => {
 			if (!script) {
 				console.error(`Received an unrecognized command: ${name}`)
 			} else {
-				const payloadPathFilename = await writePayload(data.Messages[0])
+				const payloadPathFilename = writePayload(data.Messages[0])
 				try {
 					await execute(script, payloadPathFilename)
 					console.log(`Executed command successfully: ${name}`)
@@ -125,6 +126,13 @@ const watchQueue = async () => {
 prog
 	.version(version)
 	.describe('Set up this computer to accept remote execution, using messages passed through AWS SQS. For more information, see: https://github.com/saibotsivad/remote-execute')
+
+prog
+	.command('config-path')
+	.describe('Get the path to the configuration file.')
+	.action(() => {
+		console.log(config.path())
+	})
 
 prog
 	.command('listen')
@@ -208,7 +216,7 @@ prog
 			config.set('awsprofile', name)
 			exit(0, `AWS profile set: ${name}`)
 		} else {
-			config.delete('awsprofile')
+			config.unset('awsprofile')
 			exit(0, `Removed AWS profile.`)
 		}
 	})
@@ -222,7 +230,7 @@ prog
 			config.set(`commands.${name}`, script)
 			exit(0, `Added command: ${name} => ${script}`)
 		} else {
-			config.delete(`commands.${name}`)
+			config.unset(`commands.${name}`)
 			exit(0, `Removed command: ${name}`)
 		}
 	})
@@ -243,7 +251,7 @@ prog
 			config.set('tempFolder', folder)
 			exit(0, `Payload temporary folder set: ${folder}`)
 		} else {
-			config.delete('tempFolder')
+			config.unset('tempFolder')
 			exit(0, `Payload temporary folder reverted to default: ${TEMP_FOLDER}`)
 		}
 	})
